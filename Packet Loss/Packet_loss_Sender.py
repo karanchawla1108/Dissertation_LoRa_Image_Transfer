@@ -50,9 +50,13 @@ model.load_state_dict(torch.load(
 model.eval()
 print("Model loaded OK")
  
-class FakeINA:
-    power = 0.0
-ina = FakeINA()
+import adafruit_ina219
+i2c = busio.I2C(board.SCL, board.SDA)
+ina = adafruit_ina219.INA219(i2c)
+print("INA219 ready!")
+print("Idle voltage: " + str(round(ina.bus_voltage, 2)) + "V")
+print("Idle current: " + str(round(ina.current, 2)) + "mA")
+print("Idle power:   " + str(round(ina.power, 2)) + "mW")
  
 spi = busio.SPI(board.SCK, MOSI=board.MOSI, MISO=board.MISO)
 cs  = digitalio.DigitalInOut(board.CE1)
