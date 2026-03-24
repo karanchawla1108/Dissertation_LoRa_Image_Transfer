@@ -133,7 +133,7 @@ def save_and_score(img_array, test_num, loss_label, packets_received, lost, ssim
 
 
 
-
+    # git hub update
     # Load original
     try:
         original_pil = Image.open('/home/ysj/Image_dissertation/test_image.png').convert('L').resize((28, 28))
