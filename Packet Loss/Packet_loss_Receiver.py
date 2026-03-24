@@ -3,13 +3,14 @@ import torch
 import torch.nn as nn
 import numpy as np
 import time
-import os
 import busio
 import board
+import adafruit_ina219
 import adafruit_rfm9x
 import digitalio
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 from skimage.metrics import structural_similarity as ssim
+import os
  
 class SimpleVAE(nn.Module):
     def __init__(self):
@@ -53,9 +54,12 @@ model.eval()
 print("Model loaded OK")
 
 
-class FakeINA:
-    power = 0.0
-ina = FakeINA()
+i2c = busio.I2C(board.SCL, board.SDA)
+ina = adafruit_ina219.INA219(i2c)
+print("INA219 power sensor ready")
+print("Voltage: " + str(round(ina.bus_voltage, 2)) + "V")
+print("Current: " + str(round(ina.current, 2)) + "mA")
+print("Power:   " + str(round(ina.power, 2)) + "mW")
  
 spi = busio.SPI(board.SCK, MOSI=board.MOSI, MISO=board.MISO)
 cs  = digitalio.DigitalInOut(board.CE1)
@@ -67,23 +71,30 @@ rfm.spreading_factor = 7
 rfm.enable_crc = True
 print("LoRa ready - waiting for packets...")
  
-# Create run folder automatically
-base_folder = '/home/ysj/Packet loss Image'
-os.makedirs(base_folder, exist_ok=True)
+BASE_DIR = '/home/ysj/Result for the image'
+os.makedirs(BASE_DIR, exist_ok=True)
  
-run_num = 1
-while os.path.exists(base_folder + '/run' + str(run_num)):
-    run_num += 1
-run_folder = base_folder + '/run' + str(run_num)
-os.makedirs(run_folder)
-print("Saving images to: " + run_folder)
+def get_next_folder():
+    existing = [f for f in os.listdir(BASE_DIR) if f.startswith('run') and os.path.isdir(BASE_DIR + '/' + f)]
+    if not existing:
+        return BASE_DIR + '/run1'
+    numbers = []
+    for f in existing:
+        try:
+            num = int(f.replace('run', ''))
+            numbers.append(num)
+        except:
+            pass
+    next_num = max(numbers) + 1 if numbers else 1
+    return BASE_DIR + '/run' + str(next_num)
  
-def receive_packets(num_packets=3, timeout=45):
+def receive_packets(num_packets=3, timeout=30):
     received = {}
     t_start = time.time()
+    p_before = ina.power
     while len(received) < num_packets:
         if time.time() - t_start > timeout:
-            print("Timeout!")
+            print("Timeout - moving on")
             break
         packet = rfm.receive(timeout=5.0)
         if packet is not None:
@@ -91,145 +102,111 @@ def receive_packets(num_packets=3, timeout=45):
             total   = packet[1]
             data    = bytes(packet[2:])
             received[pkt_num] = data
-            print("  Received packet " + str(pkt_num+1) + "/" + str(total))
+            print("Received packet " + str(pkt_num+1) + "/" + str(total))
+    p_after = ina.power
     rx_time = (time.time() - t_start) * 1000
+    rx_power = (p_before + p_after) / 2
     all_packets = []
-    lost = []
     for i in range(num_packets):
         if i in received:
             all_packets.append(received[i])
         else:
-            lost.append(i+1)
-            print("  Packet " + str(i+1) + " LOST - filling with zeros")
+            print("Packet " + str(i+1) + " LOST - filling with zeros")
             size = 48 if i < num_packets - 1 else 32
             all_packets.append(bytes(size))
     packets_received = len(received)
     print("Received " + str(packets_received) + "/" + str(num_packets) + " packets")
-    if lost:
-        print("Lost packets: " + str(lost))
-    print("RX time: " + str(round(rx_time, 1)) + "ms")
-    return all_packets, packets_received, rx_time, lost
+    print("RX time:  " + str(round(rx_time, 1)) + "ms")
+    print("RX power: " + str(round(rx_power, 2)) + "mW")
+    return all_packets, packets_received, rx_time, rx_power
  
 def decode_image(packets):
     payload = b''.join(packets)
     latent = np.frombuffer(payload, dtype=np.float32).copy()
     z = torch.FloatTensor(latent).unsqueeze(0)
     t_start = time.time()
+    p_before = ina.power
     with torch.no_grad():
         reconstructed = model.decode(z)
+    p_after = ina.power
     t_end = time.time()
     decode_time = (t_end - t_start) * 1000
+    decode_power = (p_before + p_after) / 2
     img_array = reconstructed.numpy().reshape(28, 28)
     print("Decoded in " + str(round(decode_time, 1)) + "ms")
-    return img_array, decode_time
+    print("Decode power: " + str(round(decode_power, 2)) + "mW")
+    return img_array, decode_time, decode_power
  
-def save_and_score(img_array, test_num, loss_label, packets_received, lost, ssim_val=None):
+def save_and_score(img_array, run_folder):
     output = (img_array * 255).astype(np.uint8)
  
-    # Save reconstructed image
-    recon_filename = run_folder + '/test' + str(test_num) + '_' + loss_label + '_reconstructed.png'
-    Image.fromarray(output).save(recon_filename)
-    print("Saved: " + recon_filename)
-
-
-
-    # git hub update
-    # Load original
+    normal_path = run_folder + '/result.png'
+    Image.fromarray(output).save(normal_path)
+    print("Saved: " + normal_path)
+ 
+    big_path = run_folder + '/result_big.png'
+    Image.fromarray(output).resize((280, 280), Image.NEAREST).save(big_path)
+    print("Saved big: " + big_path)
+    
+    
     try:
-        original_pil = Image.open('/home/ysj/Image_dissertation/test_image.png').convert('L').resize((28, 28))
-        original_arr = np.array(original_pil) / 255.0
-        score = ssim(original_arr, img_array, data_range=1.0)
+        original = np.array(
+            Image.open('/home/ysj/Image_dissertation/test_image.png').convert('L').resize((28, 28))
+        ) / 255.0
+        score = ssim(original, img_array, data_range=1.0)
         print("SSIM Score: " + str(round(score, 4)))
+ 
+        orig_big = Image.fromarray((original * 255).astype(np.uint8)).resize((280, 280), Image.NEAREST)
+        recon_big = Image.fromarray(output).resize((280, 280), Image.NEAREST)
+        comparison = Image.new('L', (580, 300), color=128)
+        comparison.paste(orig_big, (10, 10))
+        comparison.paste(recon_big, (300, 10))
+        comp_path = run_folder + '/comparison.png'
+        comparison.save(comp_path)
+        print("Saved comparison: " + comp_path)
+        return score
     except Exception as e:
-        print("SSIM error: " + str(e))
-        score = None
-        original_pil = Image.new('L', (28, 28), 0)
+        print("Could not calculate SSIM: " + str(e))
+        return None
  
-    # Make comparison image
-    scale = 10
-    size = 28 * scale
-    padding = 10
-    label_height = 30
-    total_width = (size * 2) + (padding * 3)
-    total_height = size + (padding * 2) + (label_height * 2)
+def save_log(run_folder, packets_received, rx_time, rx_power, decode_time, decode_power, total_time, ssim_score):
+    log_path = run_folder + '/results.txt'
+    with open(log_path, 'w') as f:
+        f.write("VAE LoRa Transmission Results\n")
+        f.write("==============================\n")
+        f.write("Packets received:  " + str(packets_received) + "/3\n")
+        f.write("RX time:           " + str(round(rx_time, 1)) + "ms\n")
+        f.write("Decode time:       " + str(round(decode_time, 1)) + "ms\n")
+        f.write("Total latency:     " + str(round(total_time, 1)) + "ms\n")
+        f.write("RX power:          " + str(round(rx_power, 2)) + "mW\n")
+        f.write("Decode power:      " + str(round(decode_power, 2)) + "mW\n")
+        if ssim_score:
+            f.write("SSIM Score:        " + str(round(ssim_score, 4)) + "\n")
+    print("Saved log: " + log_path)
  
-    comparison = Image.new('RGB', (total_width, total_height), color=(40, 40, 40))
+print("Waiting for transmission...")
+t_total_start = time.time()
  
-    # Paste original
-    orig_big = original_pil.resize((size, size), Image.NEAREST).convert('RGB')
-    comparison.paste(orig_big, (padding, label_height + padding))
+run_folder = get_next_folder()
+os.makedirs(run_folder)
+print("Results folder: " + run_folder)
  
-    # Paste reconstructed
-    recon_big = Image.fromarray(output).resize((size, size), Image.NEAREST).convert('RGB')
-    comparison.paste(recon_big, (size + padding * 2, label_height + padding))
+packets, packets_received, rx_time, rx_power = receive_packets()
+img_array, decode_time, decode_power = decode_image(packets)
+ssim_score = save_and_score(img_array, run_folder)
  
-    # Add labels
-    draw = ImageDraw.Draw(comparison)
+total_time = (time.time() - t_total_start) * 1000
+save_log(run_folder, packets_received, rx_time, rx_power, decode_time, decode_power, total_time, ssim_score)
  
-    # Title
-    title = "Test " + str(test_num) + " | " + loss_label + " | Packets: " + str(packets_received) + "/3"
-    if score is not None:
-        title = title + " | SSIM: " + str(round(score, 4))
-    draw.text((padding, 5), title, fill=(255, 255, 100))
- 
-    # Image labels
-    draw.text((padding, label_height + size + padding + 5), "ORIGINAL", fill=(100, 255, 100))
-    draw.text((size + padding * 2, label_height + size + padding + 5), "RECONSTRUCTED", fill=(100, 200, 255))
- 
-    # Lost packet info
-    if lost:
-        lost_text = "Lost packets: " + str(lost)
-        draw.text((size + padding * 2, 5), lost_text, fill=(255, 100, 100))
- 
-    # Save comparison
-    comp_filename = run_folder + '/test' + str(test_num) + '_' + loss_label + '_comparison.png'
-    comparison.save(comp_filename)
-    print("Comparison saved: " + comp_filename)
- 
-    return score
- 
-loss_labels = ['0pct_loss', '33pct_loss', '66pct_loss']
-all_results = []
- 
-for test_num in range(1, 4):
-    print("")
-    print("==========================================")
-    print("Waiting for TEST " + str(test_num) + " (" + loss_labels[test_num-1] + ")...")
-    print("==========================================")
- 
-    packets, packets_received, rx_time, lost = receive_packets()
-    img_array, decode_time = decode_image(packets)
-    ssim_score = save_and_score(img_array, test_num, loss_labels[test_num-1], packets_received, lost)
- 
-    all_results.append({
-        'test': test_num,
-        'label': loss_labels[test_num-1],
-        'received': packets_received,
-        'lost': lost,
-        'rx_time': rx_time,
-        'decode_time': decode_time,
-        'ssim': ssim_score
-    })
- 
-    print("Test " + str(test_num) + " complete.")
-    if test_num < 3:
-        print("Waiting for next test...")
- 
-print("")
-print("==========================================")
-print("ALL TESTS COMPLETE - FINAL RESULTS")
-print("==========================================")
-print("")
-print("Test | Label         | Packets RX | Lost  | Decode  | SSIM")
-print("-----|---------------|------------|-------|---------|------")
-for r in all_results:
-    lost_str = str(r['lost']) if r['lost'] else "none"
-    ssim_str = str(round(r['ssim'], 4)) if r['ssim'] else "N/A"
-    print(str(r['test']) + "    | " + r['label'] + "  | " + str(r['received']) + "/3        | " + lost_str + " | " + str(round(r['decode_time'], 1)) + "ms   | " + ssim_str)
- 
-print("")
-print("All images saved in: " + run_folder)
-print("  test1_0pct_loss_reconstructed.png + comparison.png")
-print("  test2_33pct_loss_reconstructed.png + comparison.png")
-print("  test3_66pct_loss_reconstructed.png + comparison.png")
+print("--- RESULTS ---")
+print("Run folder:        " + run_folder)
+print("Packets received:  " + str(packets_received) + "/3")
+print("RX time:           " + str(round(rx_time, 1)) + "ms")
+print("Decode time:       " + str(round(decode_time, 1)) + "ms")
+print("Total latency:     " + str(round(total_time, 1)) + "ms")
+print("RX power:          " + str(round(rx_power, 2)) + "mW")
+print("Decode power:      " + str(round(decode_power, 2)) + "mW")
+if ssim_score:
+    print("SSIM Score:        " + str(round(ssim_score, 4)))
 print("Done!")
+
