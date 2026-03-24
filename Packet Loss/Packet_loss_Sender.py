@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 import numpy as np
 import time
-import random
 import busio
 import board
 import adafruit_rfm9x
@@ -41,7 +40,7 @@ class SimpleVAE(nn.Module):
         mean, var = self.encode(x)
         z = self.reparameterise(mean, var)
         return self.decode(z), mean, var
- 
+
 print("Loading VAE model...")
 model = SimpleVAE()
 model.load_state_dict(torch.load(
@@ -90,14 +89,14 @@ def split_packets(latent_vector):
         packets.append(payload[i:i+48])
     return packets
  
-def send_packets(packets, loss_rate=0.0):
-    print("Sending " + str(len(packets)) + " packets at " + str(int(loss_rate*100)) + "% loss rate...")
+def send_packets(packets, drop_list=[]):
+    print("Sending " + str(len(packets)) + " packets - dropping: " + str(drop_list))
     t_start = time.time()
     sent_count = 0
     dropped_count = 0
     for i, packet in enumerate(packets):
-        if random.random() < loss_rate:
-            print("  Packet " + str(i+1) + "/" + str(len(packets)) + " DROPPED")
+        if (i+1) in drop_list:
+            print("  Packet " + str(i+1) + "/" + str(len(packets)) + " DROPPED (simulated loss)")
             dropped_count += 1
         else:
             header = bytes([i, len(packets)])
@@ -112,40 +111,40 @@ def send_packets(packets, loss_rate=0.0):
     print("TX time: " + str(round(tx_time, 1)) + "ms")
     return tx_time, sent_count, dropped_count
  
-def run_test(test_num, loss_rate, image_path):
+def run_test(test_num, drop_list, image_path, label=""):
     print("")
     print("==========================================")
-    print("TEST " + str(test_num) + "Loss Rate: " + str(int(loss_rate*100)) + "%")
+    print("TEST " + str(test_num) + " - " + label)
     print("==========================================")
     tensor = prepare_image(image_path)
     latent, enc_time = encode_image(tensor)
     packets = split_packets(latent)
-    tx_time, sent, dropped = send_packets(packets, loss_rate=loss_rate)
-    print("Test " + str(test_num) + " done. Waiting 8 seconds for receiver...")
-    time.sleep(8)
+    tx_time, sent, dropped = send_packets(packets, drop_list=drop_list)
+    print("Test " + str(test_num) + " done. Waiting 25 seconds for receiver...")
+    time.sleep(25)
     return enc_time, tx_time, sent, dropped
-    
-    
-    
-image_path = '/home/karan/test_image.png' / Image path
+ 
+image_path = '/home/karan/test_image.png'
 print("")
 print("Starting 3 packet loss tests...")
 print("Make sure receiver is running on Pi B!")
-print("Starting in 5 seconds...")
-time.sleep(5)
+print("Starting in 10 seconds...")
+time.sleep(10)
  
 results = []
 tests = [
-    (1, 0.0),
-    (2, 0.33),
-    (3, 0.66),
+    (1, [],     "0%  loss - send all 3 packets"),
+    (2, [2],    "33% loss - drop packet 2"),
+    (3, [1, 2], "66% loss - drop packets 1 and 2"),
 ]
- 
-for test_num, loss_rate in tests:
-    enc_time, tx_time, sent, dropped = run_test(test_num, loss_rate, image_path)
+
+
+for test_num, drop_list, label in tests:
+    enc_time, tx_time, sent, dropped = run_test(test_num, drop_list, image_path, label)
     results.append({
         'test': test_num,
-        'loss_rate': int(loss_rate * 100),
+        'label': label,
+        'drop_list': drop_list,
         'sent': sent,
         'dropped': dropped,
         'enc_time': enc_time,
@@ -154,9 +153,8 @@ for test_num, loss_rate in tests:
  
 print("")
 print("==========================================")
-print("ALL TESTS COMPLETEs SUMMARY")
+print("ALL TESTS COMPLETE - SUMMARY")
 print("==========================================")
 for r in results:
-    print("Test " + str(r['test']) + " | Loss: " + str(r['loss_rate']) + "% | Sent: " + str(r['sent']) + "/3 | Dropped: " + str(r['dropped']) + "/3 | TX: " + str(round(r['tx_time'], 1)) + "ms")
+    print("Test " + str(r['test']) + " | " + r['label'] + " | Sent: " + str(r['sent']) + "/3 | TX: " + str(round(r['tx_time'], 1)) + "ms")
 print("Check Pi B for SSIM scores!")
- 
