@@ -99,6 +99,19 @@ print('Saved MNIST test image - digit: ' + str(label))
 ```
 
 
+## Change the Paths in the Code 
+ 
+- **Follow the Instruction provided in the Packet loss Repo for path changing:** [Dissertation_LoRa_Image_Transfer
+](https://github.com/karanchawla1108/Dissertation_LoRa_Image_Transfer/tree/main/Packet%20Loss) 
+ 
+---
+## Related Repositories
+ 
+- **SF12 Long Range System:** [Dissertation_LoRa_Image_Transfer_Long_Distance](https://github.com/karanchawla1108/Dissertation_LoRa_Image_Transfer_long_Distance)
+- **VAE Model Training:** [Autoencoder-IoT-LoRa-Dissertation](https://github.com/karanchawla1108/Autoencoder-IoT-LoRa-Dissertation)
+ 
+---
+
 ## Running
 
 **On Pi A (Sender):**
