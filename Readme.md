@@ -101,7 +101,7 @@ print('Saved MNIST test image - digit: ' + str(label))
 
 ## Change the Paths in the Code 
  
-- **Follow the Instruction provided in the Packet loss Repo for path changing:** [Dissertation_LoRa_Image_Transfer
+- **Follow the Instruction provided in the Packet loss Repo for path changing and copying image that generated:** [Dissertation_LoRa_Image_Transfer
 ](https://github.com/karanchawla1108/Dissertation_LoRa_Image_Transfer/tree/main/Packet%20Loss) 
  
 ---
