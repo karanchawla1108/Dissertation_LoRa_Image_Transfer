@@ -20,6 +20,23 @@ Log power via INA219                       Calculate SSIM + latency
 
 ---
 
+
+## LoRa Settings (SF7)
+
+| Parameter | Value | Reason |
+|-----------|-------|--------|
+| Spreading Factor | SF7 | Fast transmission, low latency |
+| Bandwidth | 125 kHz | Standard LoRa bandwidth |
+| Coding Rate | 4/5 | Balance between reliability and speed |
+| Preamble Length | 8 | Standard detection |
+| TX Power | 23 dBm | Maximum power |
+| Frequency | 433 MHz | Unlicensed ISM band |
+| CRC | Enabled | Error detection |
+
+**Range:** Up to 45m single-building, 2-point building penetration with RFM9x modules
+
+---
+
 ## Files
 
 | File | Description |
